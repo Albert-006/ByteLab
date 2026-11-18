@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { WorkbenchStatus } from '../types/workbench.types';
 import { EXAMPLE_PROGRAMS } from '../examples/programs';
+import { ByteLabLogo } from './Brand/ByteLabLogo';
 
 export interface HeaderProps {
   status: WorkbenchStatus;
@@ -83,10 +84,8 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Left: Brand & Preset Selector */}
       <div className="flex items-center gap-3">
         {/* Brand */}
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-sm">
-            <Binary className="w-4 h-4 text-white" />
-          </div>
+        <div className="flex items-center gap-2.5">
+          <ByteLabLogo size={28} />
           <div className="flex flex-col">
             <span className="font-bold text-sm text-slate-100 tracking-tight">
               ByteLab
