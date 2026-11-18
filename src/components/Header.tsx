@@ -1,6 +1,6 @@
 /**
  * Workbench Top Bar Header Component
- * Contains Logo, Program Preset Selector, Execution Controls, Speed Selector, and Status Badge.
+ * Contains Logo, Program Preset Selector, Execution & Time Travel Controls, Speed Selector, and Status Badge.
  */
 
 import React from 'react';
@@ -8,6 +8,7 @@ import {
   Play,
   Pause,
   StepForward,
+  StepBack,
   RotateCcw,
   Binary,
   Layers,
@@ -18,9 +19,11 @@ import { EXAMPLE_PROGRAMS } from '../examples/programs';
 export interface HeaderProps {
   status: WorkbenchStatus;
   isDirty: boolean;
+  canStepBackward: boolean;
   speedMs: number;
   onAssemble: () => void;
   onStep: () => void;
+  onStepBackward: () => void;
   onRun: () => void;
   onPause: () => void;
   onReset: () => void;
@@ -31,9 +34,11 @@ export interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   status,
   isDirty,
+  canStepBackward,
   speedMs,
   onAssemble,
   onStep,
+  onStepBackward,
   onRun,
   onPause,
   onReset,
@@ -104,7 +109,27 @@ export const Header: React.FC<HeaderProps> = ({
           <span>Assemble</span>
         </button>
 
-        {/* Step Button */}
+        {/* Step Backward (Time Travel) Button */}
+        <button
+          data-testid="step-back-btn"
+          disabled={!canStepBackward || isRunning}
+          onClick={onStepBackward}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-bold transition-all ${
+            canStepBackward && !isRunning
+              ? 'bg-[#21262d] hover:bg-purple-600 hover:text-white text-slate-200 border border-[#30363d] cursor-pointer'
+              : 'bg-[#161b22] text-slate-600 border border-[#21262d] cursor-not-allowed opacity-60'
+          }`}
+          title={
+            !canStepBackward
+              ? 'Already at earliest snapshot (Step 0)'
+              : 'Step backward (Time Travel to previous state)'
+          }
+        >
+          <StepBack className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Back</span>
+        </button>
+
+        {/* Step Forward Button */}
         <button
           data-testid="step-btn"
           disabled={!canStep}

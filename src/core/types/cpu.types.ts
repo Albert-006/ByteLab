@@ -52,11 +52,40 @@ export interface CpuState {
   stackDepth: number; // 0 to 256 tracking active stack items
 }
 
+export interface AluOperationMetadata {
+  operation: string; // 'ADD' | 'SUB' | 'INC' | 'DEC' | 'AND' | 'OR' | 'XOR' | 'NOT' | 'CMP';
+  leftOperand: number;
+  rightOperand?: number;
+  result: number;
+  carryBorrow: boolean;
+  flags: CpuFlags;
+}
+
+export type CpuComponentId =
+  | 'pc'
+  | 'programMemory'
+  | 'ir'
+  | 'controlUnit'
+  | 'registerBank'
+  | 'alu'
+  | 'dataMemory'
+  | 'output';
+
+export interface CpuFlowHighlight {
+  activeComponents: CpuComponentId[];
+  activeRegisters: RegisterName[];
+  activeDataAddress?: number;
+  activePathDescription: string;
+}
+
 export interface CpuStepResult {
   success: boolean;
   halted: boolean;
   error: CpuRuntimeError | null;
   state: CpuState;
+  instruction?: Instruction | null;
+  aluOperation?: AluOperationMetadata;
+  flowHighlight?: CpuFlowHighlight;
 }
 
 export interface ICpu {
@@ -65,6 +94,7 @@ export interface ICpu {
   step(): CpuStepResult;
   run(maxSteps?: number): CpuStepResult;
   getState(): CpuState;
+  loadState(state: CpuState): void;
   getRegister(name: RegisterName): number;
   setRegister(name: RegisterName, value: number): void;
   readDataMemory(address: number): number;

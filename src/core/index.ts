@@ -3,3 +3,4 @@ export * from './types/assembler.types';
 export * from './types/cpu.types';
 export * from './assembler';
 export * from './cpu';
+export * from './debugger';

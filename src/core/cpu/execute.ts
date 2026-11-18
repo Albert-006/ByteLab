@@ -1,6 +1,7 @@
 /**
  * BL-8 Instruction Execution Dispatcher
  * Executes individual instructions against registers, ALU, memory, stack, and output.
+ * Produces authoritative ALU operation and CPU datapath flow highlights.
  */
 
 import {
@@ -10,7 +11,12 @@ import {
   LabelOperand,
   RegisterOperand,
 } from '../types/instruction.types';
-import { CpuFlags, CpuRuntimeError } from '../types/cpu.types';
+import {
+  AluOperationMetadata,
+  CpuFlags,
+  CpuFlowHighlight,
+  CpuRuntimeError,
+} from '../types/cpu.types';
 import { Alu } from './alu';
 import { Memory } from './memory';
 import { Registers } from './registers';
@@ -28,6 +34,8 @@ export interface ExecutionResult {
   stackDepth: number;
   halted?: boolean;
   error?: CpuRuntimeError;
+  aluOperation?: AluOperationMetadata;
+  flowHighlight?: CpuFlowHighlight;
 }
 
 export function executeInstruction(
@@ -37,6 +45,8 @@ export function executeInstruction(
   const { registers, memory, output } = ctx;
   let flags = { ...ctx.flags };
   let stackDepth = ctx.stackDepth;
+  let aluOperation: AluOperationMetadata | undefined;
+  let flowHighlight: CpuFlowHighlight | undefined;
 
   const getJumpTarget = (op: LabelOperand): { target: number } | { error: CpuRuntimeError } => {
     if (op.resolvedAddress === undefined) {
@@ -66,6 +76,12 @@ export function executeInstruction(
       const srcOp = instruction.operands[1] as RegisterOperand;
       const value = registers.get(srcOp.register);
       registers.set(destOp.register, value);
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `Register ${srcOp.register} (${value}) copied to Register ${destOp.register}`,
+      };
       break;
     }
 
@@ -73,6 +89,12 @@ export function executeInstruction(
       const destOp = instruction.operands[0] as RegisterOperand;
       const immOp = instruction.operands[1] as ImmediateOperand;
       registers.set(destOp.register, immOp.value);
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank'],
+        activeRegisters: [destOp.register],
+        activePathDescription: `Immediate ${immOp.value} (0x${immOp.value.toString(16).toUpperCase()}) loaded into Register ${destOp.register}`,
+      };
       break;
     }
 
@@ -81,6 +103,13 @@ export function executeInstruction(
       const addrOp = instruction.operands[1] as AddressOperand;
       const value = memory.readData(addrOp.address);
       registers.set(destOp.register, value);
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'dataMemory', 'registerBank'],
+        activeRegisters: [destOp.register],
+        activeDataAddress: addrOp.address,
+        activePathDescription: `RAM[0x${addrOp.address.toString(16).toUpperCase()}] (${value}) loaded into Register ${destOp.register}`,
+      };
       break;
     }
 
@@ -89,6 +118,13 @@ export function executeInstruction(
       const srcOp = instruction.operands[1] as RegisterOperand;
       const value = registers.get(srcOp.register);
       memory.writeData(addrOp.address, value);
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'dataMemory'],
+        activeRegisters: [srcOp.register],
+        activeDataAddress: addrOp.address,
+        activePathDescription: `Register ${srcOp.register} (${value}) stored into RAM[0x${addrOp.address.toString(16).toUpperCase()}]`,
+      };
       break;
     }
 
@@ -100,6 +136,21 @@ export function executeInstruction(
       const res = Alu.add(a, b);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'ADD',
+        leftOperand: a,
+        rightOperand: b,
+        result: res.result,
+        carryBorrow: res.flags.C,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `ALU: ADD ${destOp.register}(${a}) + ${srcOp.register}(${b}) = ${res.result}`,
+      };
       break;
     }
 
@@ -111,6 +162,21 @@ export function executeInstruction(
       const res = Alu.sub(a, b);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'SUB',
+        leftOperand: a,
+        rightOperand: b,
+        result: res.result,
+        carryBorrow: res.flags.C,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `ALU: SUB ${destOp.register}(${a}) - ${srcOp.register}(${b}) = ${res.result}`,
+      };
       break;
     }
 
@@ -120,6 +186,20 @@ export function executeInstruction(
       const res = Alu.inc(a, flags.C);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'INC',
+        leftOperand: a,
+        result: res.result,
+        carryBorrow: res.flags.C,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register],
+        activePathDescription: `ALU: INC ${destOp.register}(${a}) -> ${res.result}`,
+      };
       break;
     }
 
@@ -129,6 +209,20 @@ export function executeInstruction(
       const res = Alu.dec(a, flags.C);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'DEC',
+        leftOperand: a,
+        result: res.result,
+        carryBorrow: res.flags.C,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register],
+        activePathDescription: `ALU: DEC ${destOp.register}(${a}) -> ${res.result}`,
+      };
       break;
     }
 
@@ -140,6 +234,21 @@ export function executeInstruction(
       const res = Alu.and(a, b);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'AND',
+        leftOperand: a,
+        rightOperand: b,
+        result: res.result,
+        carryBorrow: false,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `ALU: AND ${destOp.register}(${a}) & ${srcOp.register}(${b}) = ${res.result}`,
+      };
       break;
     }
 
@@ -151,6 +260,21 @@ export function executeInstruction(
       const res = Alu.or(a, b);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'OR',
+        leftOperand: a,
+        rightOperand: b,
+        result: res.result,
+        carryBorrow: false,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `ALU: OR ${destOp.register}(${a}) | ${srcOp.register}(${b}) = ${res.result}`,
+      };
       break;
     }
 
@@ -162,6 +286,21 @@ export function executeInstruction(
       const res = Alu.xor(a, b);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'XOR',
+        leftOperand: a,
+        rightOperand: b,
+        result: res.result,
+        carryBorrow: false,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `ALU: XOR ${destOp.register}(${a}) ^ ${srcOp.register}(${b}) = ${res.result}`,
+      };
       break;
     }
 
@@ -171,6 +310,20 @@ export function executeInstruction(
       const res = Alu.not(a);
       registers.set(destOp.register, res.result);
       flags = res.flags;
+
+      aluOperation = {
+        operation: 'NOT',
+        leftOperand: a,
+        result: res.result,
+        carryBorrow: false,
+        flags: res.flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register],
+        activePathDescription: `ALU: NOT ~${destOp.register}(${a}) = ${res.result}`,
+      };
       break;
     }
 
@@ -180,6 +333,21 @@ export function executeInstruction(
       const a = registers.get(destOp.register);
       const b = registers.get(srcOp.register);
       flags = Alu.cmp(a, b);
+
+      aluOperation = {
+        operation: 'CMP',
+        leftOperand: a,
+        rightOperand: b,
+        result: (a - b + 256) & 0xff,
+        carryBorrow: flags.C,
+        flags,
+      };
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'alu'],
+        activeRegisters: [destOp.register, srcOp.register],
+        activePathDescription: `ALU: CMP ${destOp.register}(${a}) vs ${srcOp.register}(${b}) -> Flags: Z=${flags.Z ? 1 : 0}, C=${flags.C ? 1 : 0}, N=${flags.N ? 1 : 0}`,
+      };
       break;
     }
 
@@ -190,54 +358,88 @@ export function executeInstruction(
         return { flags, stackDepth, error: targetRes.error };
       }
       registers.setPC(targetRes.target);
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit'],
+        activeRegisters: [],
+        activePathDescription: `Unconditional Jump to '${labelOp.label}' (PC = ${targetRes.target})`,
+      };
       break;
     }
 
     case 'JZ': {
-      if (flags.Z) {
-        const labelOp = instruction.operands[0] as LabelOperand;
+      const labelOp = instruction.operands[0] as LabelOperand;
+      const taken = flags.Z;
+      if (taken) {
         const targetRes = getJumpTarget(labelOp);
         if ('error' in targetRes) {
           return { flags, stackDepth, error: targetRes.error };
         }
         registers.setPC(targetRes.target);
       }
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit'],
+        activeRegisters: [],
+        activePathDescription: `JZ '${labelOp.label}': ${taken ? 'Taken (Z=1)' : 'Not Taken (Z=0)'}`,
+      };
       break;
     }
 
     case 'JNZ': {
-      if (!flags.Z) {
-        const labelOp = instruction.operands[0] as LabelOperand;
+      const labelOp = instruction.operands[0] as LabelOperand;
+      const taken = !flags.Z;
+      if (taken) {
         const targetRes = getJumpTarget(labelOp);
         if ('error' in targetRes) {
           return { flags, stackDepth, error: targetRes.error };
         }
         registers.setPC(targetRes.target);
       }
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit'],
+        activeRegisters: [],
+        activePathDescription: `JNZ '${labelOp.label}': ${taken ? 'Taken (Z=0)' : 'Not Taken (Z=1)'}`,
+      };
       break;
     }
 
     case 'JC': {
-      if (flags.C) {
-        const labelOp = instruction.operands[0] as LabelOperand;
+      const labelOp = instruction.operands[0] as LabelOperand;
+      const taken = flags.C;
+      if (taken) {
         const targetRes = getJumpTarget(labelOp);
         if ('error' in targetRes) {
           return { flags, stackDepth, error: targetRes.error };
         }
         registers.setPC(targetRes.target);
       }
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit'],
+        activeRegisters: [],
+        activePathDescription: `JC '${labelOp.label}': ${taken ? 'Taken (C=1)' : 'Not Taken (C=0)'}`,
+      };
       break;
     }
 
     case 'JN': {
-      if (flags.N) {
-        const labelOp = instruction.operands[0] as LabelOperand;
+      const labelOp = instruction.operands[0] as LabelOperand;
+      const taken = flags.N;
+      if (taken) {
         const targetRes = getJumpTarget(labelOp);
         if ('error' in targetRes) {
           return { flags, stackDepth, error: targetRes.error };
         }
         registers.setPC(targetRes.target);
       }
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit'],
+        activeRegisters: [],
+        activePathDescription: `JN '${labelOp.label}': ${taken ? 'Taken (N=1)' : 'Not Taken (N=0)'}`,
+      };
       break;
     }
 
@@ -259,6 +461,13 @@ export function executeInstruction(
       memory.writeData(currentSP, value);
       registers.setSP((currentSP - 1 + 256) & 0xff);
       stackDepth++;
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'dataMemory'],
+        activeRegisters: [srcOp.register],
+        activeDataAddress: currentSP,
+        activePathDescription: `Pushed Register ${srcOp.register} (${value}) to Stack RAM[0x${currentSP.toString(16).toUpperCase()}]; SP decremented`,
+      };
       break;
     }
 
@@ -280,6 +489,13 @@ export function executeInstruction(
       const value = memory.readData(newSP);
       registers.set(destOp.register, value);
       stackDepth--;
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'dataMemory', 'registerBank'],
+        activeRegisters: [destOp.register],
+        activeDataAddress: newSP,
+        activePathDescription: `Popped Stack RAM[0x${newSP.toString(16).toUpperCase()}] (${value}) into Register ${destOp.register}; SP incremented`,
+      };
       break;
     }
 
@@ -287,6 +503,12 @@ export function executeInstruction(
       const srcOp = instruction.operands[0] as RegisterOperand;
       const value = registers.get(srcOp.register);
       output.push(value);
+
+      flowHighlight = {
+        activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit', 'registerBank', 'output'],
+        activeRegisters: [srcOp.register],
+        activePathDescription: `Register ${srcOp.register} (${value}) sent to Output port`,
+      };
       break;
     }
 
@@ -295,6 +517,11 @@ export function executeInstruction(
         flags,
         stackDepth,
         halted: true,
+        flowHighlight: {
+          activeComponents: ['pc', 'programMemory', 'ir', 'controlUnit'],
+          activeRegisters: [],
+          activePathDescription: 'CPU Halted (HLT)',
+        },
       };
     }
 
@@ -311,5 +538,5 @@ export function executeInstruction(
     }
   }
 
-  return { flags, stackDepth };
+  return { flags, stackDepth, aluOperation, flowHighlight };
 }

@@ -1,13 +1,20 @@
 /**
  * useCpuWorkbench Hook
- * Manages reactive interaction between editor source, assembler, and BL-8 CPU engine.
+ * Manages reactive interaction between editor source, assembler, BL-8 CPU engine,
+ * and the Execution History / Time Travel Debugger.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { assemble } from '../core/assembler';
 import { Cpu } from '../core/cpu';
+import { ExecutionHistoryManager } from '../core/debugger/history';
+import { TimelineSummary } from '../core/debugger/types';
 import { AssemblyResult } from '../core/types/assembler.types';
-import { CpuState } from '../core/types/cpu.types';
+import {
+  AluOperationMetadata,
+  CpuFlowHighlight,
+  CpuState,
+} from '../core/types/cpu.types';
 import { ConsoleLogEntry, WorkbenchState, WorkbenchStatus } from '../types/workbench.types';
 import { EXAMPLE_PROGRAMS } from '../examples/programs';
 
@@ -16,6 +23,7 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     EXAMPLE_PROGRAMS.find((p) => p.id === initialProgramId) ?? EXAMPLE_PROGRAMS[0];
 
   const cpuRef = useRef<Cpu>(new Cpu());
+  const historyRef = useRef<ExecutionHistoryManager>(new ExecutionHistoryManager(10_000));
   const timerRef = useRef<number | null>(null);
 
   const [sourceCode, setSourceCode] = useState<string>(initialProgram.code);
@@ -35,6 +43,17 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
   ]);
   const [selectedMemoryAddress, setSelectedMemoryAddress] = useState<number>(0);
   const [activeSourceLine, setActiveSourceLine] = useState<number | null>(null);
+
+  // Milestone 4: ALU Metadata, Flow Highlights & Timeline
+  const [aluOperation, setAluOperation] = useState<AluOperationMetadata | undefined>(undefined);
+  const [flowHighlight, setFlowHighlight] = useState<CpuFlowHighlight | undefined>(undefined);
+  const [timelineSummary, setTimelineSummary] = useState<TimelineSummary>({
+    currentStep: 0,
+    totalSteps: 0,
+    isAtLatest: true,
+    canStepBackward: false,
+    canStepForward: false,
+  });
 
   const addLog = useCallback(
     (type: ConsoleLogEntry['type'], message: string, value?: number) => {
@@ -56,15 +75,13 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     setLogs([]);
   }, []);
 
-  // Update source text and mark program dirty
   const updateSourceCode = useCallback((newSource: string) => {
     setSourceCode(newSource);
     setIsDirty(true);
   }, []);
 
-  // Assemble code and load into CPU
+  // Assemble code, reset CPU, and initialize baseline history snapshot (Step 0)
   const assembleProgram = useCallback(() => {
-    // Stop any running loop
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -75,13 +92,18 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
 
     if (result.success) {
       cpuRef.current.loadProgram(result.instructions);
-      const newState = cpuRef.current.getState();
-      setCpuState(newState);
+      const initialState = cpuRef.current.getState();
+      setCpuState(initialState);
       setPreviousCpuState(null);
       setIsDirty(false);
       setStatus('assembled');
 
-      // Highlight first instruction's source line
+      // Initialize history manager with baseline state (Step 0)
+      historyRef.current.init(initialState);
+      setTimelineSummary(historyRef.current.getTimelineSummary());
+      setAluOperation(undefined);
+      setFlowHighlight(undefined);
+
       const firstLine = result.sourceMap[0] ?? null;
       setActiveSourceLine(firstLine);
 
@@ -99,7 +121,7 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     }
   }, [sourceCode, addLog]);
 
-  // Execute exactly one instruction step
+  // Execute one forward instruction step (or resume from historical position)
   const step = useCallback(() => {
     if (isDirty) {
       addLog('error', 'Cannot step: source code was modified. Please re-assemble first.');
@@ -116,6 +138,25 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
       return;
     }
 
+    // If currently viewing history in the past and stepping forward through existing snapshots:
+    if (historyRef.current.canStepForwardHistory()) {
+      const snap = historyRef.current.stepForwardHistory();
+      if (snap) {
+        cpuRef.current.loadState(snap.cpuState);
+        setCpuState(snap.cpuState);
+        setAluOperation(snap.aluOperation);
+        setFlowHighlight(snap.flowHighlight);
+        setTimelineSummary(historyRef.current.getTimelineSummary());
+
+        if (assemblyResult) {
+          const nextLine = assemblyResult.sourceMap[snap.cpuState.specialRegisters.PC] ?? null;
+          setActiveSourceLine(nextLine);
+        }
+        return;
+      }
+    }
+
+    // Otherwise, execute a new instruction step on the engine
     const prev = cpuRef.current.getState();
     const prevOutputLength = prev.output.length;
 
@@ -124,14 +165,23 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
 
     setPreviousCpuState(prev);
     setCpuState(nextState);
+    setAluOperation(result.aluOperation);
+    setFlowHighlight(result.flowHighlight);
 
-    // Check if new output was produced
+    // Record snapshot into history manager (auto-truncates future branch if previously in past)
+    historyRef.current.recordStep(
+      nextState,
+      result.instruction,
+      result.aluOperation,
+      result.flowHighlight
+    );
+    setTimelineSummary(historyRef.current.getTimelineSummary());
+
     if (nextState.output.length > prevOutputLength) {
       const newlyEmitted = nextState.output[nextState.output.length - 1];
       addLog('out', `OUT: ${newlyEmitted} (0x${newlyEmitted.toString(16).toUpperCase().padStart(2, '0')})`, newlyEmitted);
     }
 
-    // Update active source line based on PC
     if (assemblyResult) {
       const nextLine = assemblyResult.sourceMap[nextState.specialRegisters.PC] ?? null;
       setActiveSourceLine(nextLine);
@@ -156,7 +206,55 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     }
   }, [isDirty, status, assemblyResult, addLog]);
 
-  // Run automatically on interval
+  // Step backward in history
+  const stepBackward = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    const snap = historyRef.current.stepBackward();
+    if (snap) {
+      cpuRef.current.loadState(snap.cpuState);
+      setCpuState(snap.cpuState);
+      setAluOperation(snap.aluOperation);
+      setFlowHighlight(snap.flowHighlight);
+      setTimelineSummary(historyRef.current.getTimelineSummary());
+      setStatus(snap.cpuState.status === 'idle' ? 'assembled' : snap.cpuState.status);
+
+      if (assemblyResult) {
+        const line = assemblyResult.sourceMap[snap.cpuState.specialRegisters.PC] ?? null;
+        setActiveSourceLine(line);
+      }
+    }
+  }, [assemblyResult]);
+
+  // Jump directly to an arbitrary step in history
+  const jumpToStep = useCallback(
+    (targetStep: number) => {
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      const snap = historyRef.current.jumpToStep(targetStep);
+      if (snap) {
+        cpuRef.current.loadState(snap.cpuState);
+        setCpuState(snap.cpuState);
+        setAluOperation(snap.aluOperation);
+        setFlowHighlight(snap.flowHighlight);
+        setTimelineSummary(historyRef.current.getTimelineSummary());
+        setStatus(snap.cpuState.status === 'idle' ? 'assembled' : snap.cpuState.status);
+
+        if (assemblyResult) {
+          const line = assemblyResult.sourceMap[snap.cpuState.specialRegisters.PC] ?? null;
+          setActiveSourceLine(line);
+        }
+      }
+    },
+    [assemblyResult]
+  );
+
   const run = useCallback(() => {
     if (isDirty) {
       addLog('error', 'Cannot run: source code was modified. Please re-assemble first.');
@@ -188,7 +286,6 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     }
   }, [status, addLog]);
 
-  // Interval execution when status === 'running'
   useEffect(() => {
     if (status === 'running') {
       timerRef.current = window.setInterval(() => {
@@ -207,7 +304,6 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     };
   }, [status, speedMs, step]);
 
-  // Reset CPU state to initial for loaded program
   const reset = useCallback(() => {
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
@@ -221,18 +317,31 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
       setPreviousCpuState(null);
       setStatus('assembled');
       setActiveSourceLine(assemblyResult.sourceMap[0] ?? null);
+
+      // Reset history to step 0
+      historyRef.current.init(resetState);
+      setTimelineSummary(historyRef.current.getTimelineSummary());
+      setAluOperation(undefined);
+      setFlowHighlight(undefined);
+
       addLog('info', 'CPU reset to initial state (PC=0, SP=255, registers & RAM cleared).');
     } else {
       cpuRef.current.reset();
-      setCpuState(cpuRef.current.getState());
+      const resetState = cpuRef.current.getState();
+      setCpuState(resetState);
       setPreviousCpuState(null);
       setStatus('idle');
       setActiveSourceLine(null);
+
+      historyRef.current.init(resetState);
+      setTimelineSummary(historyRef.current.getTimelineSummary());
+      setAluOperation(undefined);
+      setFlowHighlight(undefined);
+
       addLog('info', 'CPU reset.');
     }
   }, [assemblyResult, addLog]);
 
-  // Load a preset program
   const loadExample = useCallback(
     (exampleId: string) => {
       const example = EXAMPLE_PROGRAMS.find((p) => p.id === exampleId);
@@ -247,6 +356,8 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
       setIsDirty(true);
       setStatus('idle');
       setActiveSourceLine(null);
+      setAluOperation(undefined);
+      setFlowHighlight(undefined);
       addLog('info', `Loaded example program: "${example.name}". Click "Assemble" to prepare.`);
     },
     [addLog]
@@ -268,9 +379,15 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
 
   return {
     state,
+    aluOperation,
+    flowHighlight,
+    timelineSummary,
+    snapshots: historyRef.current.getAllSnapshots(),
     updateSourceCode,
     assembleProgram,
     step,
+    stepBackward,
+    jumpToStep,
     run,
     pause,
     reset,

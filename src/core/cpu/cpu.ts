@@ -55,6 +55,33 @@ export class Cpu implements ICpu {
   }
 
   /**
+   * Restores complete CPU state from a snapshot (used by Time Travel Debugger).
+   */
+  public loadState(state: CpuState): void {
+    this.registers.set('A', state.registers.A);
+    this.registers.set('B', state.registers.B);
+    this.registers.set('C', state.registers.C);
+    this.registers.set('D', state.registers.D);
+
+    this.registers.setPC(state.specialRegisters.PC);
+    this.registers.setSP(state.specialRegisters.SP);
+    this.registers.setIR(state.specialRegisters.IR ? { ...state.specialRegisters.IR } : null);
+
+    this.flags = { ...state.flags };
+
+    // Restore data memory
+    for (let addr = 0; addr < 256; addr++) {
+      this.memory.writeData(addr, state.dataMemory[addr] ?? 0);
+    }
+
+    this.output = [...state.output];
+    this.status = state.status;
+    this.cycleCount = state.cycleCount;
+    this.error = state.error ? { ...state.error } : null;
+    this.stackDepth = state.stackDepth;
+  }
+
+  /**
    * Executes a single instruction step.
    * A step after halt or error does not modify state.
    */
@@ -157,6 +184,9 @@ export class Cpu implements ICpu {
         halted: false,
         error: this.error,
         state: this.getState(),
+        instruction,
+        aluOperation: execResult.aluOperation,
+        flowHighlight: execResult.flowHighlight,
       };
     }
 
@@ -167,6 +197,9 @@ export class Cpu implements ICpu {
         halted: true,
         error: null,
         state: this.getState(),
+        instruction,
+        aluOperation: execResult.aluOperation,
+        flowHighlight: execResult.flowHighlight,
       };
     }
 
@@ -175,6 +208,9 @@ export class Cpu implements ICpu {
       halted: false,
       error: null,
       state: this.getState(),
+      instruction,
+      aluOperation: execResult.aluOperation,
+      flowHighlight: execResult.flowHighlight,
     };
   }
 
