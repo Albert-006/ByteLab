@@ -153,58 +153,6 @@ ByteLab comes with 7 built-in verified example programs:
 
 ---
 
-## Getting Started
-
-### Prerequisites
-- Node.js (v18 or higher recommended)
-- npm
-
-### Installation
-```bash
-# Clone the repository
-git clone https://github.com/Albert-006/ByteLab.git
-cd ByteLab
-
-# Install dependencies
-npm install
-```
-
-### Development
-```bash
-# Start local development server
-npm run dev
-```
-
-### Running Tests
-```bash
-# Run all unit and integration test suites
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-```
-
-### Production Build
-```bash
-# Type check and build static production assets in dist/
-npm run build
-
-# Preview production build locally
-npm run preview
-```
-
----
-
-## Vercel Deployment
-
-ByteLab is built as a static Vite application and is 100% compatible with Vercel zero-config deployment:
-
-- **Framework Preset**: Vite
-- **Build Command**: `npm run build`
-- **Output Directory**: `dist`
-- **Install Command**: `npm ci`
-
----
 
 ## Project Limitations
 
