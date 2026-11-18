@@ -1,6 +1,6 @@
 # BL-8 Instruction Set Architecture (ISA) Reference
 
-This document establishes the single authoritative specification for the 21 instructions supported by the BL-8 architecture and assembler.
+This document establishes the single authoritative specification for the 22 instructions supported by the BL-8 architecture, assembler, and execution engine.
 
 ## Instruction Format & Operand Types
 
@@ -13,80 +13,52 @@ This document establishes the single authoritative specification for the 21 inst
 
 ## Authoritative Instruction Table
 
-| Mnemonic | Opcode | Operand 1 | Operand 2 | Syntax Example | Flags Affected | Description |
+| Mnemonic | Opcode | Operand 1 | Operand 2 | Syntax Example | Flags Affected | Execution Semantics |
 |---|---|---|---|---|---|---|
-| `MOV`   | `0x01` | `reg` (dest) | `reg` (src) | `MOV A, B` | None | Copies content of `src` register into `dest` register. |
-| `LDI`   | `0x02` | `reg` (dest) | `imm`       | `LDI A, 42` / `LDI B, 0x2A` | None | Loads immediate value into `dest` register. |
-| `LOAD`  | `0x03` | `reg` (dest) | `[addr]`    | `LOAD A, [0x10]` | None | Loads 8-bit byte from Data Memory at `addr` into `dest` register. |
-| `STORE` | `0x04` | `[addr]`     | `reg` (src) | `STORE [0x10], A` | None | Stores 8-bit byte from `src` register into Data Memory at `addr`. |
-| `ADD`   | `0x10` | `reg` (dest) | `reg` (src) | `ADD A, B` | `Z`, `C`, `N` | Adds `src` to `dest` (`dest = (dest + src) & 0xFF`). Sets `C` on overflow > 255. |
-| `SUB`   | `0x11` | `reg` (dest) | `reg` (src) | `SUB A, B` | `Z`, `C`, `N` | Subtracts `src` from `dest` (`dest = (dest - src) & 0xFF`). Sets `C` on borrow (`dest < src`). |
-| `INC`   | `0x12` | `reg` (dest) | None        | `INC C` | `Z`, `N` | Increments `dest` by 1 (`dest = (dest + 1) & 0xFF`). `C` flag is preserved. |
-| `DEC`   | `0x13` | `reg` (dest) | None        | `DEC C` | `Z`, `N` | Decrements `dest` by 1 (`dest = (dest - 1) & 0xFF`). `C` flag is preserved. |
-| `AND`   | `0x20` | `reg` (dest) | `reg` (src) | `AND A, B` | `Z`, `C` (cleared), `N` | Bitwise AND (`dest = dest & src`). Clears `C`. |
-| `OR`    | `0x21` | `reg` (dest) | `reg` (src) | `OR A, B`  | `Z`, `C` (cleared), `N` | Bitwise OR (`dest = dest \| src`). Clears `C`. |
-| `XOR`   | `0x22` | `reg` (dest) | `reg` (src) | `XOR A, B` | `Z`, `C` (cleared), `N` | Bitwise XOR (`dest = dest ^ src`). Clears `C`. |
-| `NOT`   | `0x23` | `reg` (dest) | None        | `NOT A`    | `Z`, `N` | Bitwise NOT / one's complement (`dest = (~dest) & 0xFF`). `C` is preserved. |
-| `CMP`   | `0x30` | `reg` (dest) | `reg` (src) | `CMP A, B` | `Z`, `C`, `N` | Compares `dest` with `src` via subtraction without storing result. Sets flags accordingly. |
-| `JMP`   | `0x31` | `label`      | None        | `JMP loop` | None | Unconditional jump: sets `PC = target_address`. |
-| `JZ`    | `0x32` | `label`      | None        | `JZ is_zero` | None | Conditional jump: if `Z == 1`, sets `PC = target_address`. |
-| `JNZ`   | `0x33` | `label`      | None        | `JNZ loop` | None | Conditional jump: if `Z == 0`, sets `PC = target_address`. |
-| `JC`    | `0x34` | `label`      | None        | `JC overflow` | None | Conditional jump: if `C == 1`, sets `PC = target_address`. |
-| `JN`    | `0x35` | `label`      | None        | `JN negative` | None | Conditional jump: if `N == 1`, sets `PC = target_address`. |
-| `PUSH`  | `0x40` | `reg` (src)  | None        | `PUSH A` | None | Pushes register onto stack: `RAM[SP] = src; SP = (SP - 1) & 0xFF`. |
-| `POP`   | `0x41` | `reg` (dest) | None        | `POP A` | None | Pops top of stack into register: `SP = (SP + 1) & 0xFF; dest = RAM[SP]`. |
-| `OUT`   | `0x42` | `reg` (src)  | None        | `OUT A` | None | Outputs byte from register `src` to external display / output buffer. |
-| `HLT`   | `0xFF` | None         | None        | `HLT` | None | Halts CPU execution. PC does not advance. |
+| `MOV`   | `0x01` | `reg` (dest) | `reg` (src) | `MOV A, B` | None | Copies content of `src` register into `dest` register. Flags unchanged. |
+| `LDI`   | `0x02` | `reg` (dest) | `imm`       | `LDI A, 42` / `LDI B, 0x2A` | None | Loads immediate value into `dest` register. Flags unchanged. |
+| `LOAD`  | `0x03` | `reg` (dest) | `[addr]`    | `LOAD A, [0x10]` | None | Loads 8-bit byte from Data Memory at `addr` into `dest` register. Flags unchanged. |
+| `STORE` | `0x04` | `[addr]`     | `reg` (src) | `STORE [0x10], A` | None | Stores 8-bit byte from `src` register into Data Memory at `addr`. Flags unchanged. |
+| `ADD`   | `0x10` | `reg` (dest) | `reg` (src) | `ADD A, B` | `Z`, `C`, `N` | `dest = (dest + src) & 0xFF`. `C = (dest + src) > 255`. Updates `Z`, `N`. |
+| `SUB`   | `0x11` | `reg` (dest) | `reg` (src) | `SUB A, B` | `Z`, `C`, `N` | `dest = (dest - src) & 0xFF`. `C = dest < src` (borrow). Updates `Z`, `N`. |
+| `INC`   | `0x12` | `reg` (dest) | None        | `INC C` | `Z`, `N` | `dest = (dest + 1) & 0xFF`. Updates `Z`, `N`. `C` flag preserved. |
+| `DEC`   | `0x13` | `reg` (dest) | None        | `DEC C` | `Z`, `N` | `dest = (dest - 1) & 0xFF`. Updates `Z`, `N`. `C` flag preserved. |
+| `AND`   | `0x20` | `reg` (dest) | `reg` (src) | `AND A, B` | `Z`, `C`, `N` | `dest = dest & src`. Updates `Z`, `N`. `C` cleared (`false`). |
+| `OR`    | `0x21` | `reg` (dest) | `reg` (src) | `OR A, B`  | `Z`, `C`, `N` | `dest = dest \| src`. Updates `Z`, `N`. `C` cleared (`false`). |
+| `XOR`   | `0x22` | `reg` (dest) | `reg` (src) | `XOR A, B` | `Z`, `C`, `N` | `dest = dest ^ src`. Updates `Z`, `N`. `C` cleared (`false`). |
+| `NOT`   | `0x23` | `reg` (dest) | None        | `NOT A`    | `Z`, `C`, `N` | `dest = (~dest) & 0xFF`. Updates `Z`, `N`. `C` cleared (`false`). |
+| `CMP`   | `0x30` | `reg` (dest) | `reg` (src) | `CMP A, B` | `Z`, `C`, `N` | Calculates `dest - src` without writing to register. `C = dest < src`. Updates `Z`, `N`. |
+| `JMP`   | `0x31` | `label`      | None        | `JMP loop` | None | Unconditional jump: `PC = target_address`. |
+| `JZ`    | `0x32` | `label`      | None        | `JZ is_zero` | None | If `Z == true`, `PC = target_address`. |
+| `JNZ`   | `0x33` | `label`      | None        | `JNZ loop` | None | If `Z == false`, `PC = target_address`. |
+| `JC`    | `0x34` | `label`      | None        | `JC overflow` | None | If `C == true`, `PC = target_address`. |
+| `JN`    | `0x35` | `label`      | None        | `JN negative` | None | If `N == true`, `PC = target_address`. |
+| `PUSH`  | `0x40` | `reg` (src)  | None        | `PUSH A` | None | Pushes register onto stack: `RAM[SP] = src; SP = (SP - 1) & 0xFF`. Detects stack overflow. |
+| `POP`   | `0x41` | `reg` (dest) | None        | `POP A` | None | Pops top of stack: if `SP == 255` error underflow; else `SP = (SP + 1) & 0xFF; dest = RAM[SP]`. |
+| `OUT`   | `0x42` | `reg` (src)  | None        | `OUT A` | None | Appends unsigned decimal value of register `src` (0–255) to the CPU output list. |
+| `HLT`   | `0xFF` | None         | None        | `HLT` | None | Halts processor execution. Subsequent steps do not modify state. |
 
 ---
 
-## Opcode Constants
+## Detailed Stack Semantics
 
-The numeric opcode constants are defined as follows:
-
-```typescript
-export const OPCODES = {
-  MOV: 0x01,
-  LDI: 0x02,
-  LOAD: 0x03,
-  STORE: 0x04,
-  ADD: 0x10,
-  SUB: 0x11,
-  INC: 0x12,
-  DEC: 0x13,
-  AND: 0x20,
-  OR: 0x21,
-  XOR: 0x22,
-  NOT: 0x23,
-  CMP: 0x30,
-  JMP: 0x31,
-  JZ: 0x32,
-  JNZ: 0x33,
-  JC: 0x34,
-  JN: 0x35,
-  PUSH: 0x40,
-  POP: 0x41,
-  OUT: 0x42,
-  HLT: 0xff,
-} as const;
-```
+- **Initial State**: `SP = 255`. The stack pointer points to the address where the next pushed byte will be stored.
+- **Empty Stack Boundary**: An `SP` value of `255` represents an empty stack.
+- **`POP` Underflow**: Executing `POP` when `SP === 255` triggers a `STACK_UNDERFLOW` runtime error, halts execution, and reports the error.
+- **`PUSH` Overflow**: The stack can hold up to 256 bytes (depth 0 to 256). If `PUSH` is executed when the stack depth is already 256, a `STACK_OVERFLOW` runtime error is triggered.
 
 ---
 
-## Assembly Rules & Diagnostics
+## Program Counter & Execution Cycle
 
-1. **Whitespace**: Leading, trailing, and inter-operand whitespace is ignored. Commas separate multiple operands.
-2. **Comments**: Prefixed by `;` anywhere on a line; trailing content is stripped before parsing.
-3. **Labels**:
-   - Must start with a letter or underscore (`[a-zA-Z_]`) and contain alphanumeric characters or underscores (`[a-zA-Z0-9_]*`).
-   - Defined by appending a colon `:` (e.g., `start:`).
-   - Can appear standalone on a line or preceding an instruction on the same line.
-   - Duplicate label definitions produce diagnostic error `DUPLICATE_LABEL`.
-   - References to undefined labels produce diagnostic error `UNDEFINED_LABEL`.
-4. **Range Checking**:
-   - Immediate values (`imm`) and addresses (`[addr]`) must evaluate to integer values between `0` and `255` inclusive.
-   - Out-of-range values produce diagnostic error `VALUE_OUT_OF_RANGE`.
-5. **Instruction Limit**:
-   - Total program instructions cannot exceed 256. Programs with 257+ instructions produce diagnostic error `PROGRAM_TOO_LARGE`.
-6. **Error Reporting**:
-   - All errors are accumulated as structured diagnostics with source line number, column, diagnostic code, and human-readable message.
+Each CPU step follows a strictly deterministic sequence:
+1. **Status Check**: If the CPU status is already `'halted'` or `'error'`, `step()` immediately returns the current state without modification.
+2. **Bounds Check**: If `PC < 0` or `PC >= 256`, or if `programMemory[PC]` is `null`/empty:
+   - If PC has reached the end of loaded instructions, CPU cleanly transitions to `'halted'`.
+   - If PC points to an unmapped slot outside the loaded program, a `PROGRAM_COUNTER_OUT_OF_BOUNDS` runtime error is reported.
+3. **Fetch**: Latch `IR = programMemory[PC]`.
+4. **Advance PC**: Increment `PC = PC + 1` before completing instruction execution.
+5. **Execute**: Dispatch instruction logic.
+   - For taken branches (`JMP`, `JZ`, `JNZ`, `JC`, `JN`), overwrite `PC` with the resolved target address.
+   - For `HLT`, set status to `'halted'`.
+   - Increment CPU cycle count by 1.
