@@ -1,7 +1,7 @@
 /**
  * useCpuWorkbench Hook
  * Manages reactive interaction between editor source, assembler, BL-8 CPU engine,
- * and the Execution History / Time Travel Debugger.
+ * Execution History / Time Travel Debugger, Breakpoints, and Watchpoints.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -44,7 +44,7 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
   const [selectedMemoryAddress, setSelectedMemoryAddress] = useState<number>(0);
   const [activeSourceLine, setActiveSourceLine] = useState<number | null>(null);
 
-  // Milestone 4: ALU Metadata, Flow Highlights & Timeline
+  // Milestone 4 & 5: ALU Metadata, Flow Highlights, Timeline, Breakpoints & Watchpoints
   const [aluOperation, setAluOperation] = useState<AluOperationMetadata | undefined>(undefined);
   const [flowHighlight, setFlowHighlight] = useState<CpuFlowHighlight | undefined>(undefined);
   const [timelineSummary, setTimelineSummary] = useState<TimelineSummary>({
@@ -54,6 +54,9 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     canStepBackward: false,
     canStepForward: false,
   });
+
+  const [breakpoints, setBreakpoints] = useState<Set<number>>(new Set());
+  const [watchpoints, setWatchpoints] = useState<Set<number>>(new Set());
 
   const addLog = useCallback(
     (type: ConsoleLogEntry['type'], message: string, value?: number) => {
@@ -78,6 +81,31 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
   const updateSourceCode = useCallback((newSource: string) => {
     setSourceCode(newSource);
     setIsDirty(true);
+  }, []);
+
+  // Breakpoints & Watchpoints toggles
+  const toggleBreakpoint = useCallback((line: number) => {
+    setBreakpoints((prev) => {
+      const next = new Set(prev);
+      if (next.has(line)) {
+        next.delete(line);
+      } else {
+        next.add(line);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleWatchpoint = useCallback((address: number) => {
+    setWatchpoints((prev) => {
+      const next = new Set(prev);
+      if (next.has(address)) {
+        next.delete(address);
+      } else {
+        next.add(address);
+      }
+      return next;
+    });
   }, []);
 
   // Assemble code, reset CPU, and initialize baseline history snapshot (Step 0)
@@ -121,7 +149,7 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     }
   }, [sourceCode, addLog]);
 
-  // Execute one forward instruction step (or resume from historical position)
+  // Execute one forward instruction step (or step through existing history)
   const step = useCallback(() => {
     if (isDirty) {
       addLog('error', 'Cannot step: source code was modified. Please re-assemble first.');
@@ -177,6 +205,18 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     );
     setTimelineSummary(historyRef.current.getTimelineSummary());
 
+    // Check watchpoint triggers
+    if (watchpoints.size > 0) {
+      for (const addr of watchpoints) {
+        if (prev.dataMemory[addr] !== nextState.dataMemory[addr]) {
+          addLog(
+            'info',
+            `[Watchpoint Triggered] RAM[0x${addr.toString(16).toUpperCase()}] changed from ${prev.dataMemory[addr]} to ${nextState.dataMemory[addr]}`
+          );
+        }
+      }
+    }
+
     if (nextState.output.length > prevOutputLength) {
       const newlyEmitted = nextState.output[nextState.output.length - 1];
       addLog('out', `OUT: ${newlyEmitted} (0x${newlyEmitted.toString(16).toUpperCase().padStart(2, '0')})`, newlyEmitted);
@@ -204,7 +244,7 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     } else {
       setStatus((s) => (s === 'running' ? 'running' : 'paused'));
     }
-  }, [isDirty, status, assemblyResult, addLog]);
+  }, [isDirty, status, assemblyResult, watchpoints, addLog]);
 
   // Step backward in history
   const stepBackward = useCallback(() => {
@@ -286,10 +326,37 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     }
   }, [status, addLog]);
 
+  // Run timer with Breakpoint and Watchpoint checking
   useEffect(() => {
     if (status === 'running') {
       timerRef.current = window.setInterval(() => {
+        // Check if next instruction is at a breakpoint
+        const currentPC = cpuRef.current.getState().specialRegisters.PC;
+        const currentLine = assemblyResult?.sourceMap[currentPC];
+        if (currentLine && breakpoints.has(currentLine)) {
+          // Pause before executing breakpoint line!
+          pause();
+          addLog('info', `[Breakpoint Hit] Execution paused at line ${currentLine} (PC = ${currentPC}).`);
+          return;
+        }
+
+        const prevMem = cpuRef.current.getState().dataMemory;
         step();
+
+        // Check watchpoints after step
+        if (watchpoints.size > 0) {
+          const nextMem = cpuRef.current.getState().dataMemory;
+          for (const addr of watchpoints) {
+            if (prevMem[addr] !== nextMem[addr]) {
+              pause();
+              addLog(
+                'info',
+                `[Watchpoint Hit] Paused: RAM[0x${addr.toString(16).toUpperCase()}] changed to ${nextMem[addr]}.`
+              );
+              break;
+            }
+          }
+        }
       }, speedMs);
     } else if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
@@ -302,7 +369,7 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
         timerRef.current = null;
       }
     };
-  }, [status, speedMs, step]);
+  }, [status, speedMs, breakpoints, watchpoints, assemblyResult, step, pause, addLog]);
 
   const reset = useCallback(() => {
     if (timerRef.current !== null) {
@@ -318,7 +385,6 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
       setStatus('assembled');
       setActiveSourceLine(assemblyResult.sourceMap[0] ?? null);
 
-      // Reset history to step 0
       historyRef.current.init(resetState);
       setTimelineSummary(historyRef.current.getTimelineSummary());
       setAluOperation(undefined);
@@ -363,6 +429,51 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     [addLog]
   );
 
+  // File Import & Export
+  const exportSourceFile = useCallback((fileName: string = 'program.asm') => {
+    try {
+      const blob = new Blob([sourceCode], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName.endsWith('.asm') ? fileName : `${fileName}.asm`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      addLog('success', `Exported source code to ${link.download}.`);
+    } catch (err) {
+      addLog('error', `Failed to export file: ${(err as Error).message}`);
+    }
+  }, [sourceCode, addLog]);
+
+  const importSourceFile = useCallback((file: File) => {
+    if (!file.name.endsWith('.asm') && !file.name.endsWith('.txt')) {
+      addLog('error', `Cannot import '${file.name}': only .asm or .txt assembly files are supported.`);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      if (typeof content === 'string') {
+        if (timerRef.current !== null) {
+          window.clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setSourceCode(content);
+        setIsDirty(true);
+        setStatus('idle');
+        setActiveSourceLine(null);
+        addLog('success', `Imported '${file.name}' (${content.split('\n').length} lines). Click "Assemble" to build.`);
+      }
+    };
+    reader.onerror = () => {
+      addLog('error', `Error reading file '${file.name}'.`);
+    };
+    reader.readAsText(file);
+  }, [addLog]);
+
   const state: WorkbenchState = {
     sourceCode,
     isDirty,
@@ -375,6 +486,8 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     selectedMemoryAddress,
     activeSourceLine,
     error: cpuState.error,
+    breakpoints,
+    watchpoints,
   };
 
   return {
@@ -393,7 +506,11 @@ export function useCpuWorkbench(initialProgramId: string = 'fibonacci') {
     reset,
     setSpeedMs,
     setSelectedMemoryAddress,
+    toggleBreakpoint,
+    toggleWatchpoint,
     clearLogs,
     loadExample,
+    exportSourceFile,
+    importSourceFile,
   };
 }

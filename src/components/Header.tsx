@@ -1,9 +1,10 @@
 /**
  * Workbench Top Bar Header Component
- * Contains Logo, Program Preset Selector, Execution & Time Travel Controls, Speed Selector, and Status Badge.
+ * Contains Logo, Program Preset Selector, Execution Controls, Speed Selector,
+ * Import/Export buttons, and Status Badge.
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   Play,
   Pause,
@@ -12,6 +13,8 @@ import {
   RotateCcw,
   Binary,
   Layers,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { WorkbenchStatus } from '../types/workbench.types';
 import { EXAMPLE_PROGRAMS } from '../examples/programs';
@@ -29,6 +32,8 @@ export interface HeaderProps {
   onReset: () => void;
   onSpeedChange: (speedMs: number) => void;
   onSelectExample: (id: string) => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,17 +49,37 @@ export const Header: React.FC<HeaderProps> = ({
   onReset,
   onSpeedChange,
   onSelectExample,
+  onExport,
+  onImport,
 }) => {
   const isRunning = status === 'running';
   const isHalted = status === 'halted';
   const isError = status === 'error';
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Can step only when assembled, not dirty, and neither halted nor error
   const canStep = !isDirty && status !== 'idle' && !isHalted && !isError && !isRunning;
   const canRun = !isDirty && status !== 'idle' && !isHalted && !isError;
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      onImport(file);
+      e.target.value = ''; // Reset input
+    }
+  };
+
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-[#161b22] border-b border-[#30363d] text-slate-200 font-mono shadow-md">
+      {/* Hidden file input for importing .asm files */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".asm,.txt"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       {/* Left: Brand & Preset Selector */}
       <div className="flex items-center gap-3">
         {/* Brand */}
@@ -81,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
             data-testid="program-select"
             defaultValue="fibonacci"
             onChange={(e) => onSelectExample(e.target.value)}
-            className="bg-[#0d1117] border border-[#30363d] text-slate-300 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500 hover:border-slate-500 cursor-pointer"
+            className="bg-[#0d1117] border border-[#30363d] text-slate-300 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500 hover:border-slate-500 cursor-pointer max-w-[190px] truncate"
           >
             {EXAMPLE_PROGRAMS.map((prog) => (
               <option key={prog.id} value={prog.id}>
@@ -89,6 +114,26 @@ export const Header: React.FC<HeaderProps> = ({
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Import & Export Tools */}
+        <div className="flex items-center gap-1">
+          <button
+            data-testid="import-asm-btn"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-1 rounded bg-[#21262d] hover:bg-[#30363d] text-slate-300 border border-[#30363d] transition-colors"
+            title="Import local .asm file"
+          >
+            <Upload className="w-3.5 h-3.5" />
+          </button>
+          <button
+            data-testid="export-asm-btn"
+            onClick={onExport}
+            className="p-1 rounded bg-[#21262d] hover:bg-[#30363d] text-slate-300 border border-[#30363d] transition-colors"
+            title="Export assembly code as .asm"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 

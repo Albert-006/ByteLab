@@ -1,7 +1,7 @@
 /**
  * Assembly Editor Component
  * Integrates Monaco Editor with custom BL-8 syntax highlighting,
- * active instruction line decoration, and diagnostics overlay.
+ * active instruction line decoration, breakpoint glyphs, and diagnostics overlay.
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -12,7 +12,7 @@ import {
   BL8_THEME_ID,
   registerBl8Language,
 } from './monaco-bl8-language';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CircleDot } from 'lucide-react';
 
 export interface AssemblyEditorProps {
   code: string;
@@ -20,6 +20,8 @@ export interface AssemblyEditorProps {
   activeSourceLine: number | null;
   diagnostics: AssemblerDiagnostic[];
   isDirty: boolean;
+  breakpoints: Set<number>;
+  onToggleBreakpoint: (line: number) => void;
 }
 
 export const AssemblyEditor: React.FC<AssemblyEditorProps> = ({
@@ -28,25 +30,39 @@ export const AssemblyEditor: React.FC<AssemblyEditorProps> = ({
   activeSourceLine,
   diagnostics,
   isDirty,
+  breakpoints,
+  onToggleBreakpoint,
 }) => {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  const decorationsRef = useRef<string[]>([]);
+  const activeDecorationsRef = useRef<string[]>([]);
+  const breakpointDecorationsRef = useRef<string[]>([]);
+
   // Handle Monaco Mount
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     registerBl8Language(monaco);
+
+    // Gutter click to toggle breakpoint
+    editor.onMouseDown((e) => {
+      if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+        const line = e.target.position?.lineNumber;
+        if (line) {
+          onToggleBreakpoint(line);
+        }
+      }
+    });
   };
 
-  // Update line decorations when activeSourceLine changes
+  // Update active line decoration
   useEffect(() => {
     if (!editorRef.current || !monacoRef.current) return;
     const editor = editorRef.current;
     const monaco = monacoRef.current;
 
     if (activeSourceLine !== null && activeSourceLine > 0) {
-      decorationsRef.current = editor.deltaDecorations(decorationsRef.current, [
+      activeDecorationsRef.current = editor.deltaDecorations(activeDecorationsRef.current, [
         {
           range: new monaco.Range(activeSourceLine, 1, activeSourceLine, 1),
           options: {
@@ -56,12 +72,32 @@ export const AssemblyEditor: React.FC<AssemblyEditorProps> = ({
           },
         },
       ]);
-      // Scroll smoothly to active line
       editor.revealLineInCenterIfOutsideViewport(activeSourceLine);
     } else {
-      decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
+      activeDecorationsRef.current = editor.deltaDecorations(activeDecorationsRef.current, []);
     }
   }, [activeSourceLine]);
+
+  // Update breakpoint glyph decorations
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+
+    const bpDecorations = Array.from(breakpoints).map((line) => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: false,
+        glyphMarginClassName: 'monaco-breakpoint-glyph',
+        glyphMarginHoverMessage: { value: `Breakpoint on line ${line}` },
+      },
+    }));
+
+    breakpointDecorationsRef.current = editor.deltaDecorations(
+      breakpointDecorationsRef.current,
+      bpDecorations
+    );
+  }, [breakpoints]);
 
   // Update diagnostic markers in Monaco
   useEffect(() => {
@@ -104,6 +140,15 @@ export const AssemblyEditor: React.FC<AssemblyEditorProps> = ({
               Unassembled Changes
             </span>
           )}
+          {breakpoints.size > 0 && (
+            <span
+              data-testid="breakpoints-badge"
+              className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-950/60 text-red-300 border border-red-800/40 flex items-center gap-1"
+            >
+              <CircleDot className="w-3 h-3 text-red-400" />
+              <span>{breakpoints.size} BP</span>
+            </span>
+          )}
         </div>
         <div className="text-slate-500 text-[11px]">
           {activeSourceLine ? `Executing Line ${activeSourceLine}` : 'Ready'}
@@ -113,12 +158,24 @@ export const AssemblyEditor: React.FC<AssemblyEditorProps> = ({
       {/* Main Editor View */}
       <div className="flex-1 min-h-[300px] relative">
         {isTestEnvironment ? (
-          <textarea
-            data-testid="assembly-editor-textarea"
-            className="w-full h-full p-4 font-mono text-sm bg-[#111722] text-slate-100 resize-none focus:outline-none"
-            value={code}
-            onChange={(e) => onChange(e.target.value)}
-          />
+          <div className="w-full h-full flex flex-col">
+            <textarea
+              data-testid="assembly-editor-textarea"
+              className="w-full flex-1 p-4 font-mono text-sm bg-[#111722] text-slate-100 resize-none focus:outline-none"
+              value={code}
+              onChange={(e) => onChange(e.target.value)}
+            />
+            {/* Test helper button to toggle breakpoint */}
+            <div className="p-2 bg-[#161b22] border-t border-[#30363d] flex gap-2">
+              <button
+                data-testid="test-toggle-bp-btn"
+                onClick={() => onToggleBreakpoint(2)}
+                className="text-[10px] px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800"
+              >
+                Toggle BP Line 2
+              </button>
+            </div>
+          </div>
         ) : (
           <Editor
             height="100%"

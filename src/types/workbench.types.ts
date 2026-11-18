@@ -28,9 +28,11 @@ export interface WorkbenchState {
   cpuState: CpuState;
   previousCpuState: CpuState | null;
   status: WorkbenchStatus;
-  speedMs: number; // Interval ms for auto-run (e.g. 50, 200, 500, 1000)
+  speedMs: number; // Interval ms for auto-run
   logs: ConsoleLogEntry[];
   selectedMemoryAddress: number;
   activeSourceLine: number | null; // 1-based source line corresponding to PC
   error: CpuRuntimeError | null;
+  breakpoints: Set<number>; // Set of 1-based source lines with active breakpoints
+  watchpoints: Set<number>; // Set of Data RAM addresses (0-255) being watched
 }

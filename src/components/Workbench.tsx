@@ -1,7 +1,8 @@
 /**
  * ByteLab Main Workbench Component
  * Integrates Top Bar, Monaco Assembly Editor, CPU Dashboard, Datapath Flow View,
- * ALU Panel, Memory Inspector, Output Console, and Time Travel Debugger Timeline.
+ * ALU Panel, Memory Inspector, Output Console, Time Travel Debugger Timeline,
+ * Breakpoints, Watchpoints, and Import/Export.
  */
 
 import React from 'react';
@@ -32,8 +33,12 @@ export const Workbench: React.FC = () => {
     reset,
     setSpeedMs,
     setSelectedMemoryAddress,
+    toggleBreakpoint,
+    toggleWatchpoint,
     clearLogs,
     loadExample,
+    exportSourceFile,
+    importSourceFile,
   } = useCpuWorkbench('fibonacci');
 
   return (
@@ -52,6 +57,8 @@ export const Workbench: React.FC = () => {
         onReset={reset}
         onSpeedChange={setSpeedMs}
         onSelectExample={loadExample}
+        onExport={() => exportSourceFile('bytelab-program.asm')}
+        onImport={importSourceFile}
       />
 
       {/* Main Workspace Layout */}
@@ -66,6 +73,8 @@ export const Workbench: React.FC = () => {
               activeSourceLine={state.activeSourceLine}
               diagnostics={state.assemblyResult?.diagnostics ?? []}
               isDirty={state.isDirty}
+              breakpoints={state.breakpoints}
+              onToggleBreakpoint={toggleBreakpoint}
             />
           </div>
 
@@ -116,7 +125,9 @@ export const Workbench: React.FC = () => {
               prevDataMemory={state.previousCpuState?.dataMemory}
               stackPointer={state.cpuState.specialRegisters.SP}
               selectedAddress={state.selectedMemoryAddress}
+              watchpoints={state.watchpoints}
               onSelectAddress={setSelectedMemoryAddress}
+              onToggleWatchpoint={toggleWatchpoint}
             />
           </div>
         </section>

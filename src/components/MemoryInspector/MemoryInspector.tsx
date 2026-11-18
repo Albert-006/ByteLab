@@ -1,19 +1,21 @@
 /**
  * Memory Inspector Component
  * Renders 256 bytes of Data Memory (RAM) in a 16x16 grid.
- * Highlights changed cells, indicates current Stack Pointer (SP),
- * and provides a cell inspector showing decimal, hex, binary, and ASCII.
+ * Supports memory address watchpoints, cell inspection,
+ * and stack pointer position tracking.
  */
 
 import React, { useMemo } from 'react';
-import { Database, Eye } from 'lucide-react';
+import { Database, Eye, BellRing, BellOff } from 'lucide-react';
 
 export interface MemoryInspectorProps {
   dataMemory: number[];
   prevDataMemory?: number[];
   stackPointer: number;
   selectedAddress: number;
+  watchpoints: Set<number>;
   onSelectAddress: (address: number) => void;
+  onToggleWatchpoint: (address: number) => void;
 }
 
 export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
@@ -21,7 +23,9 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
   prevDataMemory,
   stackPointer,
   selectedAddress,
+  watchpoints,
   onSelectAddress,
+  onToggleWatchpoint,
 }) => {
   const selectedValue = dataMemory[selectedAddress] ?? 0;
   const selectedHex = `0x${selectedValue.toString(16).toUpperCase().padStart(2, '0')}`;
@@ -31,6 +35,8 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
     selectedValue >= 32 && selectedValue <= 126
       ? String.fromCharCode(selectedValue)
       : '.';
+
+  const isSelectedWatched = watchpoints.has(selectedAddress);
 
   // Group 256 bytes into 16 rows of 16 bytes
   const rows = useMemo(() => {
@@ -54,6 +60,14 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
           <span className="font-semibold text-slate-200 uppercase tracking-wider">
             Data Memory (256 Bytes RAM)
           </span>
+          {watchpoints.size > 0 && (
+            <span
+              data-testid="watchpoints-badge"
+              className="text-[10px] px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40 font-bold"
+            >
+              {watchpoints.size} Watched
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-[11px]">
           <div className="flex items-center gap-1.5">
@@ -90,6 +104,7 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
                   const addr = row.baseAddress + colIdx;
                   const isSelected = addr === selectedAddress;
                   const isSP = addr === stackPointer;
+                  const isWatched = watchpoints.has(addr);
                   const isChanged =
                     prevDataMemory !== undefined &&
                     prevDataMemory[addr] !== byteVal;
@@ -100,20 +115,27 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
                       key={addr}
                       data-testid={`memory-cell-${addr}`}
                       onClick={() => onSelectAddress(addr)}
-                      className={`p-1 text-center cursor-pointer transition-colors text-[11px] rounded ${
+                      className={`relative p-1 text-center cursor-pointer transition-colors text-[11px] rounded ${
                         isSelected
                           ? 'bg-blue-600 text-white font-bold ring-1 ring-white'
                           : isSP
                           ? 'bg-purple-900/60 text-purple-200 border border-purple-500 font-bold'
                           : isChanged
                           ? 'bg-blue-950/80 text-blue-300 border border-blue-500 font-bold animate-pulse'
+                          : isWatched
+                          ? 'bg-amber-950/50 text-amber-300 border border-amber-600 font-bold'
                           : isNonZero
                           ? 'text-cyan-300 font-semibold'
                           : 'text-slate-600 hover:text-slate-300 hover:bg-[#1c2128]'
                       }`}
-                      title={`Address 0x${addr.toString(16).toUpperCase().padStart(2, '0')} (${addr}): Value ${byteVal} (0x${byteVal.toString(16).toUpperCase().padStart(2, '0')})`}
+                      title={`Address 0x${addr.toString(16).toUpperCase().padStart(2, '0')} (${addr}): Value ${byteVal} (0x${byteVal.toString(16).toUpperCase().padStart(2, '0')})${
+                        isWatched ? ' [WATCHED]' : ''
+                      }`}
                     >
                       {byteVal.toString(16).toUpperCase().padStart(2, '0')}
+                      {isWatched && (
+                        <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      )}
                     </td>
                   );
                 })}
@@ -128,12 +150,38 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
         data-testid="selected-cell-inspector"
         className="p-3 bg-[#161b22] border border-[#30363d] rounded-lg flex flex-wrap items-center justify-between gap-3 text-xs"
       >
-        <div className="flex items-center gap-2">
-          <Eye className="w-3.5 h-3.5 text-blue-400" />
-          <span className="text-slate-400">Selected Address:</span>
-          <span className="font-bold text-slate-100">
-            0x{selectedAddress.toString(16).toUpperCase().padStart(2, '0')} ({selectedAddress})
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Eye className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-slate-400">Address:</span>
+            <span className="font-bold text-slate-100">
+              0x{selectedAddress.toString(16).toUpperCase().padStart(2, '0')} ({selectedAddress})
+            </span>
+          </div>
+
+          {/* Watchpoint Toggle Button */}
+          <button
+            data-testid="toggle-watchpoint-btn"
+            onClick={() => onToggleWatchpoint(selectedAddress)}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold border transition-all ${
+              isSelectedWatched
+                ? 'bg-amber-950/80 text-amber-300 border-amber-600 hover:bg-amber-900'
+                : 'bg-[#21262d] text-slate-400 border-[#30363d] hover:text-slate-200'
+            }`}
+            title={isSelectedWatched ? 'Remove watchpoint' : 'Pause execution when this memory cell changes'}
+          >
+            {isSelectedWatched ? (
+              <>
+                <BellOff className="w-3 h-3 text-amber-400" />
+                <span>Watching</span>
+              </>
+            ) : (
+              <>
+                <BellRing className="w-3 h-3 text-slate-500" />
+                <span>Watch</span>
+              </>
+            )}
+          </button>
         </div>
 
         <div className="flex items-center gap-4 text-[11px]">
